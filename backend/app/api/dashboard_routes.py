@@ -26,6 +26,7 @@ from ..db.models import (
     Customer,
     KpiDailySnapshot,
     Message,
+    SenderType,  # Phase 9: added for POST /api/conversations/{id}/messages
     Order,
     OrderItem,
     OrderStatus,
@@ -34,6 +35,7 @@ from ..db.models import (
 )
 from ..db.session import get_db
 from .auth import create_access_token, get_current_staff, verify_password
+from .websocket import broadcast_new_message  # Phase 9: added for staff-reply push
 
 logger = logging.getLogger(__name__)
 
@@ -266,6 +268,85 @@ async def get_conversation_messages(
             }
             for m in rows
         ],
+    }
+
+
+# ---------------------------------------------------------------------
+# Staff message — added in Phase 9
+# ---------------------------------------------------------------------
+
+
+class StaffMessageCreate(BaseModel):
+    content: str
+
+
+@router.post("/conversations/{conversation_id}/messages", status_code=status.HTTP_201_CREATED)
+async def post_staff_message(
+    conversation_id: str,
+    body: StaffMessageCreate,
+    staff: dict = Depends(get_current_staff),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Staff-authored reply. Persists a Message row with sender='staff',
+    bumps the conversation's last_message_at, and broadcasts over the
+    dashboard websocket so other staff viewing this conversation see
+    the new message live.
+
+    Trust boundary: business_id comes from the JWT — same pattern as
+    every other staff endpoint in this file. The conversation is
+    scoped by joining through Customer.business_id; mismatched or
+    missing rows surface as a 404 without revealing whether the
+    conversation exists under a different business.
+
+    KNOWN LIMITATION (Phase 9 scope): this persists the message and
+    fans it out to dashboards, but does NOT send the message out to
+    the originating channel (WhatsApp / Instagram / Facebook). For a
+    full staff-reply path, this endpoint would also dispatch via
+    channels/{channel}.py:send() using the conversation's channel and
+    the customer's external ID. Deferred per Phase 9's plan note:
+    "post through whatever endpoint Phase 6 exposes ... add one in
+    this phase if it wasn't included in Phase 6".
+    """
+    conv_uuid = _parse_uuid(conversation_id)
+    if conv_uuid is None:
+        raise HTTPException(status_code=404, detail="conversation not found")
+
+    stmt = (
+        select(Conversation, Customer)
+        .join(Customer, Customer.id == Conversation.customer_id)
+        .where(Conversation.id == conv_uuid)
+    )
+    row = (await db.execute(stmt)).first()
+    if row is None or str(row[1].business_id) != staff["business_id"]:
+        raise HTTPException(status_code=404, detail="conversation not found")
+
+    conversation = row[0]
+    msg = Message(
+        conversation_id=conv_uuid,
+        sender=SenderType.STAFF,
+        content=body.content,
+    )
+    db.add(msg)
+    conversation.last_message_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(msg)
+
+    # Broadcast so any other staff dashboards viewing this conversation
+    # pick the new message up live. The sender's own dashboard will see
+    # a brief duplicate (its own optimistic append + this WS event);
+    # Conversations.tsx dedupes on (sender, content, recent).
+    await broadcast_new_message(
+        business_id=staff["business_id"],
+        conversation_id=str(conv_uuid),
+        text=body.content,
+    )
+
+    return {
+        "id": str(msg.id),
+        "sender": msg.sender.value,
+        "content": msg.content,
+        "created_at": msg.created_at.isoformat(),
     }
 
 

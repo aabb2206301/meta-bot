@@ -5,6 +5,12 @@
  * field-for-field.
  *
  * >>> PHASE 8 <<< — endpoint functions + interfaces implemented below.
+ * >>> PHASE 9 (additive) <<< — postStaffMessage() added for the staff
+ * reply box in Conversations.tsx. The matching endpoint
+ * (POST /api/conversations/{id}/messages) was not present in Phase 6's
+ * dashboard_routes.py and is added in this phase per the Phase 9
+ * plan's "add one in this phase if it wasn't included in Phase 6"
+ * note.
  */
 
 const BASE_URL = "/api";
@@ -137,8 +143,9 @@ export const getKpiSummary = (params?: { from?: string; to?: string; channel?: s
   apiGet<KpiSummaryResponse>(`/kpis/summary${toQueryString(params ?? {})}`);
 
 // ---------------------------------------------------------------------
-// Conversations — mirrors GET /api/conversations and
-// GET /api/conversations/{id}/messages
+// Conversations — mirrors GET /api/conversations,
+// GET /api/conversations/{id}/messages, and (Phase 9)
+// POST /api/conversations/{id}/messages
 // ---------------------------------------------------------------------
 
 export interface ConversationListItem {
@@ -182,6 +189,20 @@ export interface ConversationMessagesResponse {
 
 export const getConversationMessages = (conversationId: string) =>
   apiGet<ConversationMessagesResponse>(`/conversations/${conversationId}/messages`);
+
+// Phase 9 addition — mirrors the staff-reply endpoint added to
+// dashboard_routes.py in this phase (see file header).
+export interface StaffMessage {
+  id: string;
+  sender: string; // always "staff" — typed loosely to match the
+  //                ConversationMessage sender union for reuse in the
+  //                message thread.
+  content: string;
+  created_at: string;
+}
+
+export const postStaffMessage = (conversationId: string, content: string) =>
+  apiPost<StaffMessage>(`/conversations/${conversationId}/messages`, { content });
 
 // ---------------------------------------------------------------------
 // Orders — mirrors GET /api/orders and PATCH /api/orders/{id}
