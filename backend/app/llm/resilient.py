@@ -1,30 +1,74 @@
 """
-ResilientLLM — wraps a primary LLMProvider; on failure (rate limit,
-timeout, 5xx) retries once, then falls back to a secondary provider if
-configured and settings.llm_fallback_enabled is true.
+ResilientLLM — wraps a primary LLMProvider with a bounded retry, then falls
+back to a secondary provider if one is configured. This is what makes the
+"default + alternate" provider setup actually useful at runtime (e.g. Groq
+rate-limits mid-conversation), not just a config toggle you flip by hand.
 
->>> PHASE 1 TARGET — implement per PROJECT_PLAN.md section 3 <<<
-
-TODO:
-- class ResilientLLM(LLMProvider):
-      def __init__(self, primary: LLMProvider, secondary: LLMProvider | None): ...
-      async def chat(self, messages, tools) -> LLMResponse:
-          try: retry primary once on known transient errors
-          except <transient error>: fall back to secondary if present
-- Define/import a shared "transient LLM error" concept so this file
-  doesn't need to know each provider's SDK-specific exception classes —
-  either normalize exceptions in groq_provider.py/google_provider.py, or
-  catch broadly here and log what actually failed.
-- Log every fallback event (at minimum: which provider failed, why, and
-  which provider served the request) — useful during a live demo when
-  Groq rate-limits mid-conversation.
+Design note: wrapping is done inside llm/factory.py, not by callers. Callers
+(the orchestrator, Phase 4) always just get something satisfying
+LLMProvider — they never need to know whether fallback is active.
 """
+import asyncio
+import logging
+
 from .base import LLMProvider, LLMResponse
+
+logger = logging.getLogger(__name__)
 
 
 class ResilientLLM(LLMProvider):
-    def __init__(self, primary: LLMProvider, secondary: LLMProvider | None = None):
-        raise NotImplementedError("Phase 1: implement ResilientLLM")
+    def __init__(
+        self,
+        primary: LLMProvider,
+        secondary: LLMProvider | None = None,
+        max_retries: int = 1,
+        retry_backoff_seconds: float = 1.0,
+    ):
+        self.primary = primary
+        self.secondary = secondary
+        self.max_retries = max_retries
+        self.retry_backoff_seconds = retry_backoff_seconds
 
     async def chat(self, messages: list[dict], tools: list[dict]) -> LLMResponse:
-        raise NotImplementedError("Phase 1: implement ResilientLLM.chat")
+        last_exc: Exception | None = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                return await self.primary.chat(messages, tools)
+            except Exception as exc:  # noqa: BLE001 - deliberately broad: any
+                # failure from either SDK (rate limit, timeout, 5xx, transport
+                # error) should trigger retry/fallback rather than killing the
+                # conversation. Non-retryable programmer errors (e.g. a bad
+                # tool schema) will also hit this, fail the same way on
+                # retry/fallback, and surface via the final raise below.
+                last_exc = exc
+                logger.warning(
+                    "Primary LLM provider (%s) failed on attempt %d/%d: %s",
+                    type(self.primary).__name__,
+                    attempt + 1,
+                    self.max_retries + 1,
+                    exc,
+                )
+                if attempt < self.max_retries:
+                    await asyncio.sleep(self.retry_backoff_seconds * (attempt + 1))
+
+        if self.secondary is not None:
+            logger.error(
+                "Primary LLM provider (%s) exhausted retries, falling back to %s",
+                type(self.primary).__name__,
+                type(self.secondary).__name__,
+            )
+            try:
+                return await self.secondary.chat(messages, tools)
+            except Exception as fallback_exc:  # noqa: BLE001
+                logger.error(
+                    "Fallback LLM provider (%s) also failed: %s",
+                    type(self.secondary).__name__,
+                    fallback_exc,
+                )
+                raise RuntimeError(
+                    "Both primary and fallback LLM providers failed"
+                ) from fallback_exc
+
+        assert last_exc is not None
+        raise last_exc

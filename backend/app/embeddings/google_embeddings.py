@@ -1,32 +1,54 @@
 """
-Google implementation of EmbeddingProvider, using text-embedding-004 (or
-whatever settings.embedding_model is set to).
+Google implementation of EmbeddingProvider, used for product/FAQ semantic
+search. Groq has no embeddings endpoint, so this is the only embeddings
+provider today — see embeddings/factory.py for what happens when it isn't
+configured (keyword-search fallback, not a crash).
 
->>> PHASE 2 TARGET — implement per PROJECT_PLAN.md section 3 <<<
-
-TODO:
-- class GoogleEmbeddings(EmbeddingProvider):
-      def __init__(self, api_key: str, model: str): self.client = genai.Client(api_key=api_key); ...
-      async def embed(self, text: str) -> list[float]:
-          call self.client.aio.models.embed_content(model=self.model, contents=text)
-          return the .values list from the response
-      async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-          batch call if the SDK supports it, else loop + gather
-- Confirm the output dimension matches settings.embedding_dimensions (768
-  for text-embedding-004) — this MUST match the `Vector(768)` column
-  width in db/models.py or inserts will fail.
-- Raise a clear error if api_key is missing rather than letting the SDK
-  fail with an opaque message.
+IMPORTANT: the vector this returns must be exactly `settings.embedding_
+dimensions` (768 by default) long, because that's the width baked into the
+`Vector(768)` column on Product.embedding / Faq.embedding in db/models.py.
+If you ever change EMBEDDING_MODEL or EMBEDDING_DIMENSIONS, both the env
+var and the DB column width (via a new migration) need to change together
+— this file alone can't make that safe.
 """
+from google import genai
+from google.genai import types
+
 from .base import EmbeddingProvider
 
 
-class GoogleEmbeddings(EmbeddingProvider):
-    def __init__(self, api_key: str, model: str):
-        raise NotImplementedError("Phase 2: implement GoogleEmbeddings")
+class GoogleEmbeddingProvider(EmbeddingProvider):
+    def __init__(self, api_key: str, model: str, output_dimensionality: int):
+        self.client = genai.Client(api_key=api_key)
+        self.model = model
+        self.output_dimensionality = output_dimensionality
 
     async def embed(self, text: str) -> list[float]:
-        raise NotImplementedError("Phase 2: implement GoogleEmbeddings.embed")
+        (vector,) = await self.embed_batch([text])
+        return vector
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        raise NotImplementedError("Phase 2: implement GoogleEmbeddings.embed_batch")
+        if not texts:
+            return []
+
+        response = await self.client.aio.models.embed_content(
+            model=self.model,
+            contents=texts,
+            config=types.EmbedContentConfig(output_dimensionality=self.output_dimensionality),
+        )
+
+        vectors = [list(embedding.values) for embedding in response.embeddings]
+
+        for vector in vectors:
+            if len(vector) != self.output_dimensionality:
+                # Fail loud rather than silently write a mismatched-width
+                # vector into a pgvector column that expects a fixed size.
+                raise ValueError(
+                    f"Google embeddings returned dimension {len(vector)}, "
+                    f"expected {self.output_dimensionality} "
+                    "(settings.embedding_dimensions / Vector(768) column width). "
+                    "If you changed EMBEDDING_MODEL, update EMBEDDING_DIMENSIONS "
+                    "and the matching Alembic migration too."
+                )
+
+        return vectors

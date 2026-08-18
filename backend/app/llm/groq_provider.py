@@ -1,50 +1,62 @@
 """
 Groq implementation of LLMProvider (default chat provider).
 
->>> PHASE 1 TARGET — implement per PROJECT_PLAN.md section 3 <<<
-
-Reference shape (from the plan — verify against the current `groq` SDK
-version pinned in requirements.txt, since tool-call response shapes do
-shift between SDK versions):
-
-    class GroqProvider(LLMProvider):
-        def __init__(self, api_key: str, model: str):
-            self.client = AsyncGroq(api_key=api_key)
-            self.model = model
-
-        async def chat(self, messages, tools):
-            resp = await self.client.chat.completions.create(
-                model=self.model, messages=messages, tools=tools, tool_choice="auto",
-            )
-            choice = resp.choices[0].message
-            tool_calls = [
-                ToolCall(id=tc.id, name=tc.function.name,
-                         arguments=json.loads(tc.function.arguments))
-                for tc in (choice.tool_calls or [])
-            ]
-            return LLMResponse(
-                text=choice.content, tool_calls=tool_calls,
-                input_tokens=resp.usage.prompt_tokens,
-                output_tokens=resp.usage.completion_tokens,
-            )
-
-Groq's API is OpenAI-compatible, so tools/registry.py's schema (OpenAI
-format) passes straight through with no conversion.
-
-TODO:
-- Implement __init__ and chat() as above.
-- Wrap the API call in try/except for groq.APIError / RateLimitError /
-  APITimeoutError and re-raise as a common exception type that
-  llm/resilient.py knows how to catch (define it there or here).
-- Handle the case where choice.content is None but tool_calls is also
-  empty (shouldn't happen, but don't let it crash silently).
+Groq's chat.completions API is OpenAI-compatible, so the tool schema in
+tools/registry.py (written once, in OpenAI's function-calling format) is
+passed straight through with no translation — unlike GoogleProvider,
+which needs adapter functions.
 """
-from .base import LLMProvider, LLMResponse, ToolCall  # noqa: F401
+import json
+import logging
+
+from groq import AsyncGroq
+
+from .base import LLMProvider, LLMResponse, ToolCall
+
+logger = logging.getLogger(__name__)
 
 
 class GroqProvider(LLMProvider):
     def __init__(self, api_key: str, model: str):
-        raise NotImplementedError("Phase 1: implement GroqProvider")
+        self.client = AsyncGroq(api_key=api_key)
+        self.model = model
 
     async def chat(self, messages: list[dict], tools: list[dict]) -> LLMResponse:
-        raise NotImplementedError("Phase 1: implement GroqProvider.chat")
+        # Groq's API rejects an empty tools array in some SDK/model combos —
+        # only pass tools/tool_choice when there's actually something to offer.
+        kwargs: dict = {
+            "model": self.model,
+            "messages": messages,
+        }
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+
+        completion = await self.client.chat.completions.create(**kwargs)
+        choice = completion.choices[0].message
+
+        tool_calls: list[ToolCall] = []
+        for tc in (choice.tool_calls or []):
+            try:
+                arguments = json.loads(tc.function.arguments)
+            except (json.JSONDecodeError, TypeError):
+                # The model occasionally emits malformed JSON. Don't crash the
+                # whole turn over it — surface the raw string so the caller
+                # (or a future retry) can decide what to do with it.
+                logger.warning(
+                    "Groq returned non-JSON tool arguments for %s: %r",
+                    tc.function.name,
+                    tc.function.arguments,
+                )
+                arguments = {"_raw_arguments": tc.function.arguments}
+            tool_calls.append(
+                ToolCall(id=tc.id, name=tc.function.name, arguments=arguments)
+            )
+
+        usage = completion.usage
+        return LLMResponse(
+            text=choice.content,
+            tool_calls=tool_calls,
+            input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+            output_tokens=getattr(usage, "completion_tokens", 0) or 0,
+        )

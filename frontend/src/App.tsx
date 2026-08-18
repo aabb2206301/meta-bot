@@ -1,24 +1,69 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
+import type { ReactElement } from "react";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import Conversations from "./pages/Conversations";
 import Orders from "./pages/Orders";
 import Products from "./pages/Products";
+import Login from "./pages/Login";
+import { isAuthenticated } from "./api/client";
 
 /**
- * Routing shell — complete in the boilerplate. Wire this to real auth
- * (redirect to a login page when no JWT is present) in Phase 8, since
- * that's the same phase that finishes api/client.ts's auth handling.
+ * Routing shell. Phase 8: every route except /login now requires a JWT
+ * (checked via api/client.ts's isAuthenticated()) — no token redirects
+ * to /login instead of rendering the page.
  */
+function RequireAuth({ children }: { children: ReactElement }): ReactElement {
+  if (!isAuthenticated()) {
+    return <Navigate to="/login" replace />;
+  }
+  return children;
+}
+
 export default function App() {
   return (
-    <Layout>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/conversations" element={<Conversations />} />
-        <Route path="/orders" element={<Orders />} />
-        <Route path="/products" element={<Products />} />
-      </Routes>
-    </Layout>
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route
+        path="/"
+        element={
+          <RequireAuth>
+            <Layout>
+              <Dashboard />
+            </Layout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/conversations"
+        element={
+          <RequireAuth>
+            <Layout>
+              <Conversations />
+            </Layout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/orders"
+        element={
+          <RequireAuth>
+            <Layout>
+              <Orders />
+            </Layout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/products"
+        element={
+          <RequireAuth>
+            <Layout>
+              <Products />
+            </Layout>
+          </RequireAuth>
+        }
+      />
+    </Routes>
   );
 }
