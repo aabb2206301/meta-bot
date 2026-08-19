@@ -105,12 +105,15 @@ async def get_kpi_summary(
     db: AsyncSession = Depends(get_db),
 ):
     business_id = staff["business_id"]
-    # kpi_daily_snapshot.date is stored as a plain string column (see
-    # db/models.py comment: "DATE — kept simple; cast in queries"), but
-    # since it's always written as ISO YYYY-MM-DD, lexical string
-    # comparison sorts/filters identically to a real date column.
-    to_date = to or date.today().isoformat()
-    from_date = from_ or (date.today() - timedelta(days=DEFAULT_KPI_WINDOW_DAYS)).isoformat()
+    # kpi_daily_snapshot.date is a real Postgres DATE column (see
+    # db/models.py) — bind params here must be datetime.date objects,
+    # not ISO strings, or asyncpg raises DatatypeMismatchError.
+    to_date = date.fromisoformat(to) if to else date.today()
+    from_date = (
+        date.fromisoformat(from_)
+        if from_
+        else date.today() - timedelta(days=DEFAULT_KPI_WINDOW_DAYS)
+    )
 
     conditions = [
         KpiDailySnapshot.business_id == business_id,

@@ -27,12 +27,12 @@ logger = logging.getLogger(__name__)
 # JSON-schema "type" (as used in tools/registry.py, OpenAI-style, lowercase)
 # -> Gemini's types.Type enum.
 _JSON_TYPE_TO_GEMINI = {
-    "string": types.Type.STRING,
-    "number": types.Type.NUMBER,
-    "integer": types.Type.INTEGER,
-    "boolean": types.Type.BOOLEAN,
-    "array": types.Type.ARRAY,
-    "object": types.Type.OBJECT,
+    "string": "STRING",
+    "number": "NUMBER",
+    "integer": "INTEGER",
+    "boolean": "BOOLEAN",
+    "array": "ARRAY",
+    "object": "OBJECT",
 }
 
 

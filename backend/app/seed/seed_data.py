@@ -52,7 +52,7 @@ KNOWN LIMITATIONS (called out per the plan)
 import asyncio
 import random
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import bcrypt
 from faker import Faker
@@ -235,6 +235,13 @@ async def seed() -> None:
                 faqs.append(faq)
                 objects.append(faq)
 
+            # Flush business/staff/products/faqs now so their rows exist in
+            # the DB before customers are inserted (FK-safety — don't rely
+            # on unit-of-work to auto-order across this many tables).
+            db.add_all(objects)
+            await db.flush()
+            objects = []
+
             # --- 5. Customers ------------------------------------------------
             customers: list[Customer] = []
             customer_channel: dict[uuid.UUID, ChannelType] = {}
@@ -253,6 +260,11 @@ async def seed() -> None:
                 customers.append(customer)
                 customer_channel[customer.id] = channel
                 objects.append(customer)
+
+            # Flush customers before conversations reference customer_id.
+            db.add_all(objects)
+            await db.flush()
+            objects = []
 
             # --- 6. Conversations + Messages ---------------------------------
             conversations: list[Conversation] = []
@@ -353,6 +365,11 @@ async def seed() -> None:
 
                 conversation.last_message_at = last_message_time
 
+            # Flush conversations/messages before leads reference conversation_id.
+            db.add_all(objects)
+            await db.flush()
+            objects = []
+
             # --- 7. Leads ------------------------------------------------------
             lead_status_weights = [
                 (LeadStatus.new, 0.25),
@@ -383,6 +400,11 @@ async def seed() -> None:
                 )
                 leads.append(lead)
                 objects.append(lead)
+
+            # Flush leads before orders reference lead_id.
+            db.add_all(objects)
+            await db.flush()
+            objects = []
 
             # --- 8. Orders + Order Items ---------------------------------------
             order_status_weights = [
@@ -458,7 +480,7 @@ async def seed() -> None:
                 snapshot = KpiDailySnapshot(
                     id=uuid.uuid4(),
                     business_id=business.id,
-                    date=date_str,
+                    date=date.fromisoformat(date_str),
                     channel=channel,
                     enquiries_count=agg["enquiries_count"],
                     ai_resolved_count=agg["ai_resolved_count"],

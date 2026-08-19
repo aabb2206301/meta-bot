@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    Date,
     ForeignKey,
     Numeric,
     String,
@@ -236,7 +237,7 @@ class KpiDailySnapshot(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     business_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("businesses.id"), nullable=False)
-    date = mapped_column(String, nullable=False)  # DATE — kept simple; cast in queries
+    date: Mapped[date] = mapped_column(Date, nullable=False)
     channel: Mapped[ChannelType | None] = mapped_column(SAEnum(ChannelType, name="channel_type"))
     enquiries_count: Mapped[int | None] = mapped_column(default=0)
     ai_resolved_count: Mapped[int | None] = mapped_column(default=0)
