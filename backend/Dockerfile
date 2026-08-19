@@ -29,4 +29,4 @@ COPY . .
 
 # Default: run migrations then start the server. Override `command` in
 # docker-compose if you want to skip migrations on a particular run.
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

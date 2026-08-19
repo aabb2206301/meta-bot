@@ -1,57 +1,23 @@
 # =============================================================================
-# Full local stack — postgres + backend + frontend.
+# Local dev stack — backend + frontend only.
+# Database is cloud-hosted (Postgres + pgvector) — no local postgres service.
+# Set DATABASE_URL / ALEMBIC_DATABASE_URL in backend/.env to point at your
+# cloud DB (see backend/.env.example for the full variable list).
 #
-# `docker compose up -d --build` brings up everything. See README.md for the
-# one-time extension-enable + migrate + seed dance.
-#
-# The previous version of this file only had the `postgres` service. The
-# backend/frontend services here are optional — you can keep running them
-# locally with `uvicorn` / `npm run dev` and just use this file's
-# `postgres` service for the database. Either way is supported.
+# `docker compose up -d --build` brings up backend + frontend locally,
+# both talking to your cloud database.
 # =============================================================================
 
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: sales_agent
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      # Init script: enables vector + uuid-ossp on first container start.
-      # Only runs when the data volume is empty (i.e. fresh setup). For
-      # an existing volume, run the CREATE EXTENSION commands manually
-      # (see README.md "Gotchas" section).
-      - ./db/init.sql:/docker-entrypoint-initdb.d/01-extensions.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d sales_agent"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   backend:
     build: ./backend
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
-      # Override defaults from .env so docker-to-docker networking
-      # works (host=postgres, not localhost).
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/sales_agent
-      ALEMBIC_DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/sales_agent
       APP_ENV: development
     env_file:
-      - ./backend/.env
+      - ./backend/.env   # DATABASE_URL / ALEMBIC_DATABASE_URL point at cloud DB here
     ports:
       - "8000:8000"
-    # The CMD defined in the Dockerfile already runs `alembic upgrade head`
-    # then `uvicorn`. If you want to skip migrations on a particular run,
-    # override `command` here.
     volumes:
       - ./backend/app:/app/app  # live-reload code in dev
 
@@ -69,6 +35,3 @@ services:
       - "5173:5173"
     volumes:
       - ./frontend/src:/app/src  # live-reload code in dev
-
-volumes:
-  pgdata:
