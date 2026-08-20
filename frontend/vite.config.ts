@@ -8,8 +8,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": { target: "http://localhost:8000", changeOrigin: true },
-      "/ws": { target: "ws://localhost:8000", ws: true },
+      "/api": { target: "meta-bot-production-d1da.up.railway.app:8000", changeOrigin: true },
+      "/ws": { target: "meta-bot-production-d1da.up.railway.app:8000", ws: true },
     },
   },
 });
