@@ -214,7 +214,13 @@ export default function Conversations() {
     setSending(true);
     try {
       const msg = await postStaffMessage(selectedId, replyText.trim());
-      setMessages((prev) => [...prev, msg]);
+      // postStaffMessage returns the narrower StaffMessage shape (no
+      // tool_calls/tool_results — staff replies never have them), so
+      // normalize to ConversationMessage before appending to thread state.
+      setMessages((prev) => [
+        ...prev,
+        { ...msg, tool_calls: null, tool_results: null } satisfies ConversationMessage,
+      ]);
       setReplyText("");
     } catch (e) {
       // Use a simple alert for now — the project doesn't have a toast
