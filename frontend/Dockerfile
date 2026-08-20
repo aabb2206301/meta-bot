@@ -8,21 +8,43 @@
 # Out of scope for Phase 11 — the plan is dev-first.
 # =============================================================================
 
-FROM node:20-alpine
+# =============================================================================
+# Production frontend image — multi-stage build.
+#
+# Stage 1 builds a static bundle with `vite build`. VITE_* build args are
+# baked into the JS at build time (Vite env vars are compile-time, not
+# runtime) — set them as build args / env vars on the Railway frontend
+# service, pointing at the backend service's public URL.
+#
+# Stage 2 serves the static bundle with `serve`, listening on Railway's
+# injected $PORT. This replaces the old dev-server-in-prod setup, which is
+# also what was tripping Vite's allowedHosts check against Railway's edge
+# proxy Host header.
+#
+# For local dev, keep using `docker-compose.yml` / `npm run dev` — this
+# Dockerfile is prod-only.
+# =============================================================================
 
+FROM node:20-alpine AS build
 WORKDIR /app
 
-# Install deps first for layer caching.
 COPY package.json package-lock.json* ./
 RUN npm install
 
-# Copy the rest of the app code. In dev, docker-compose overrides this
-# with a bind mount for live-reload.
 COPY . .
 
-EXPOSE 5173
+ARG VITE_API_URL
+ARG VITE_WS_URL
+ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_WS_URL=$VITE_WS_URL
 
-# --host 0.0.0.0 makes the dev server reachable from outside the container
-# (otherwise it binds to 127.0.0.1 inside the container, unreachable from
-# the host's localhost:5173 mapping).
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+RUN npm run build
+
+FROM node:20-alpine
+WORKDIR /app
+RUN npm install -g serve
+
+COPY --from=build /app/dist ./dist
+
+# Railway sets $PORT dynamically — shell form so it actually expands.
+CMD serve -s dist -l ${PORT:-4173}

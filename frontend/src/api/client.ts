@@ -13,7 +13,13 @@
  * note.
  */
 
-const BASE_URL = "/api";
+// In prod (split Railway services) VITE_API_URL points at the backend's
+// public URL, e.g. https://meta-bot-production-d1da.up.railway.app — set
+// it as a build-time env var on the frontend service. Falls back to the
+// relative /api path for local dev via Vite's dev-server proxy.
+const BASE_URL = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL}/api`
+  : "/api";
 const TOKEN_STORAGE_KEY = "jwt";
 
 // ---------------------------------------------------------------------

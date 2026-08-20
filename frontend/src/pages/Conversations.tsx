@@ -156,8 +156,12 @@ export default function Conversations() {
   useEffect(() => {
     const token = getToken();
     if (!token) return;
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${proto}//${window.location.host}/ws/conversations?token=${encodeURIComponent(token)}`;
+    // Same split-service concern as client.ts's BASE_URL: in prod the
+    // websocket lives on the backend's own domain, not this page's origin.
+    const wsBase =
+      import.meta.env.VITE_WS_URL ??
+      `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws`;
+    const url = `${wsBase}/conversations?token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
