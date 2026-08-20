@@ -46,5 +46,7 @@ RUN npm install -g serve
 
 COPY --from=build /app/dist ./dist
 
-# Railway sets $PORT dynamically — shell form so it actually expands.
-CMD serve -s dist -l ${PORT:-4173}
+# Railway sets $PORT dynamically. Bind explicitly to 0.0.0.0 (not just
+# the port) — some serve versions default to localhost-only, which
+# Railway's edge proxy can't reach even though the process is "running".
+CMD sh -c "serve -s dist -l tcp://0.0.0.0:${PORT:-4173}"
